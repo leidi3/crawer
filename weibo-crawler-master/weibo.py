@@ -103,7 +103,12 @@ class Weibo(object):
         self.mysql_config = config.get("mysql_config")  # MySQL数据库连接配置，可以不填
         self.mongodb_URI = config.get("mongodb_URI")  # MongoDB数据库连接字符串，可以不填
         self.post_config = config.get("post_config")  # post_config，可以不填
-        self.page_weibo_count = config.get("page_weibo_count")  # page_weibo_count，爬取一页的微博数，默认10页
+        self.page_weibo_count = config.get("page_weibo_count", 10)  # page_weibo_count，爬取一页的微博数，默认10条
+        try:
+            self.page_weibo_count = int(self.page_weibo_count)
+        except (TypeError, ValueError):
+            logger.error("page_weibo_count 无法转换为整数，请检查配置")
+            self.page_weibo_count = 10
         
         # 初始化 LLM 分析器
         self.llm_analyzer = LLMAnalyzer(config) if config.get("llm_config") else None
