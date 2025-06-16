@@ -955,8 +955,10 @@ class Weibo(object):
             weibo["screen_name"] = ""
         weibo["id"] = int(weibo_info["id"])
         weibo["bid"] = weibo_info["bid"]
-        text_body = weibo_info["text"]
+        text_body = str(weibo_info.get("text", ""))
         selector = etree.HTML(f"{text_body}<hr>" if text_body.isspace() else text_body)
+        if selector is None:
+            selector = etree.HTML("<div></div>")
         if self.remove_html_tag:
             text_list = selector.xpath("//text()")
             # 若text_list中的某个字符串元素以 @ 或 # 开始，则将该元素与前后元素合并为新元素，否则会带来没有必要的换行
