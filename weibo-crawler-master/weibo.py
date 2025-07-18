@@ -103,7 +103,12 @@ class Weibo(object):
         self.mysql_config = config.get("mysql_config")  # MySQL数据库连接配置，可以不填
         self.mongodb_URI = config.get("mongodb_URI")  # MongoDB数据库连接字符串，可以不填
         self.post_config = config.get("post_config")  # post_config，可以不填
-        self.page_weibo_count = config.get("page_weibo_count")  # page_weibo_count，爬取一页的微博数，默认10页
+        self.page_weibo_count = config.get("page_weibo_count", 10)  # page_weibo_count，爬取一页的微博数，默认10条
+        try:
+            self.page_weibo_count = int(self.page_weibo_count)
+        except (TypeError, ValueError):
+            logger.error("page_weibo_count 无法转换为整数，请检查配置")
+            self.page_weibo_count = 10
         
         # 初始化 LLM 分析器
         self.llm_analyzer = LLMAnalyzer(config) if config.get("llm_config") else None
@@ -950,8 +955,10 @@ class Weibo(object):
             weibo["screen_name"] = ""
         weibo["id"] = int(weibo_info["id"])
         weibo["bid"] = weibo_info["bid"]
-        text_body = weibo_info["text"]
+        text_body = str(weibo_info.get("text", ""))
         selector = etree.HTML(f"{text_body}<hr>" if text_body.isspace() else text_body)
+        if selector is None:
+            selector = etree.HTML("<div></div>")
         if self.remove_html_tag:
             text_list = selector.xpath("//text()")
             # 若text_list中的某个字符串元素以 @ 或 # 开始，则将该元素与前后元素合并为新元素，否则会带来没有必要的换行
@@ -1313,14 +1320,13 @@ class Weibo(object):
                     weibos = weibos[0]["card_group"]
                 # 如果需要检查cookie，在循环第一个人的时候，就要看看仅自己可见的信息有没有，要是没有直接报错
                 for w in weibos:
+                    card_list = []
                     if w["card_type"] == 11:
-                        temp = w.get("card_group",[0])
-                        if len(temp) >= 1:
-                            w = temp[0] or w
-                        else:
-                            w = w
-                    if w["card_type"] == 9:
-                        wb = self.get_one_weibo(w)
+                        card_list = [c for c in w.get("card_group", []) if c.get("card_type") == 9]
+                    elif w["card_type"] == 9:
+                        card_list = [w]
+                    for card in card_list:
+                        wb = self.get_one_weibo(card)
                         if wb:
                             if (
                                 const.CHECK_COOKIE["CHECK"]
@@ -1463,24 +1469,12 @@ class Weibo(object):
         write_info = []
         for w in self.weibo[wrote_count:]:
             wb = OrderedDict()
-            for k, v in w.items():
-                if k not in ["user_id", "screen_name", "retweet"]:
-                    if "unicode" in str(type(v)):
-                        v = v.encode("utf-8")
-                    if k == "id":
-                        v = str(v) + "\t"
-                    wb[k] = v
-            if not self.only_crawl_original:
-                if w.get("retweet"):
-                    wb["is_original"] = False
-                    for k2, v2 in w["retweet"].items():
-                        if "unicode" in str(type(v2)):
-                            v2 = v2.encode("utf-8")
-                        if k2 == "id":
-                            v2 = str(v2) + "\t"
-                        wb["retweet_" + k2] = v2
-                else:
-                    wb["is_original"] = True
+            wb["话题"] = w.get("topics", "")
+            wb["点赞数"] = w.get("attitudes_count", 0)
+            wb["转发数"] = w.get("reposts_count", 0)
+            full_time = w.get("created_at", "") or w.get("full_created_at", "")
+            wb["发布时间"] = full_time.replace(" ", "T")
+            wb["url"] = f"https://m.weibo.cn/detail/{w.get('id')}"
             write_info.append(wb)
         return write_info
 
@@ -1510,27 +1504,7 @@ class Weibo(object):
 
     def get_result_headers(self):
         """获取要写入结果文件的表头"""
-        result_headers = [
-            "id",
-            "bid",
-            "正文",
-            "头条文章url",
-            "原始图片url",
-            "视频url",
-            "位置",
-            "日期",
-            "工具",
-            "点赞数",
-            "评论数",
-            "转发数",
-            "话题",
-            "@用户",
-            "完整日期",
-        ]
-        if not self.only_crawl_original:
-            result_headers2 = ["是否原创", "源用户id", "源用户昵称"]
-            result_headers3 = ["源微博" + r for r in result_headers]
-            result_headers = result_headers + result_headers2 + result_headers3
+        result_headers = ["话题", "点赞数", "转发数", "发布时间", "url"]
         return result_headers
 
     def write_csv(self, wrote_count):
